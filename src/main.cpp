@@ -1,4 +1,4 @@
-#include <AFMotor.h>
+//#include <AFMotor.h>
 #include <Arduino.h>
 #include <Adafruit_I2CDevice.h>
 #include <SPI.h>
@@ -6,6 +6,7 @@
 #include <vectors_line.h>
 #include <EDifferential.h>
 
+#define DEBUGMSG 1
 enum MOVESTRAT
 {
   PCONTROL_L=1,
@@ -18,24 +19,24 @@ enum MOVESTRAT
 
 long lastMillis;
 
-void motor_move(AF_DCMotor motor, int power)
-{
-  if(power==0)
-  {
-    motor.setSpeed(0);
-    motor.run(RELEASE);
-  }
-  else if (power> 0)
-  {
-    motor.setSpeed(abs(power));
-    motor.run(FORWARD);
-  }
-  else if (power< 0)
-  {
-    motor.setSpeed(abs(power));
-    motor.run(BACKWARD);
-  }
-}
+// void motor_move(AF_DCMotor motor, int power)
+// {
+//   if(power==0)
+//   {
+//     motor.setSpeed(0);
+//     motor.run(RELEASE);
+//   }
+//   else if (power> 0)
+//   {
+//     motor.setSpeed(abs(power));
+//     motor.run(FORWARD);
+//   }
+//   else if (power< 0)
+//   {
+//     motor.setSpeed(abs(power));
+//     motor.run(BACKWARD);
+//   }
+// }
 
 class sensor_buff
 {
@@ -45,18 +46,25 @@ class sensor_buff
     int indexPos;
     int pin;  
     //int bias;
-    int thresholdBlack=500;
+    int thresholdBlack=900;
     bool outofline;
     virtual int readSensor()
     {
       //read = analogRead(pin);
       if(analogRead(pin)<thresholdBlack)
       {  
-          return 1; //tune something here
+        // Serial.print(indexPos);
+        // Serial.print(": ");
+        // Serial.println(analogRead(pin));
+        
+        return 1; //tune something here
       }
       else
       {
-          return 0; //tune something here
+        // Serial.print(indexPos);
+        // Serial.print(": ");
+        // Serial.println(analogRead(pin));
+        return 0; //tune something here
       }
     }  
   
@@ -68,14 +76,24 @@ class linetrackingSensor
     double frameRead(sensor_buff* sensearray)
     {
       auto senseResult = pollLayer(sensearray);
+#ifdef DEBUGMSG
+      //Serial.println(senseResult,BIN);
+      
+#endif
+
       if(senseResult == 0b00000100)
       {
+        //Serial.println("On Line");
         return 0; //In this system it means hold your rate
       }
       else
       {
-        return  0.01* (-(senseResult>>3) + ((senseResult>>1 | senseResult<<1) & 0b00000011));
+        double sense = (double)(-(senseResult>>3) + (((senseResult>>1 & 0b00000001)| senseResult<<1) & 0b00000011));
+        // Serial.print("a: ");
+        //Serial.println((((senseResult>>1 & 0b00000001)| senseResult<<1) & 0b00000011),BIN);
+         return sense;
       }
+      //Serial.println("Nothing");
       return 0;
     }
     
@@ -89,8 +107,11 @@ class linetrackingSensor
       for(int i =0;i<5;i++)
       {
         poll |= (sensearray[i].readSensor()<<(i));
+        
       }
       poll &= 0b00011111;
+      // Serial.print("b:");
+      //Serial.println(poll,BIN);
       return poll;
     }
 };
@@ -98,19 +119,26 @@ class linetrackingSensor
 sensor_buff sensorArray[5];
 linetrackingSensor ltsA;
 
-AF_DCMotor motor_left(1);
-AF_DCMotor motor_right(4);
+// AF_DCMotor motor_left(1);
+// AF_DCMotor motor_right(4);
 //WTF are the pins? IN1234, 2345, PWM 6,9
+#define IN1_PIN 2
+#define IN2_PIN 3
+#define IN3_PIN 4
+#define IN4_PIN 5
 
-#define PGAIN 1.2
+#define ENA 9
+#define ENB 6
+
+#define PGAIN 0.9
 #define IGAIN 0.1
-#define DGAIN 0.1
+#define DGAIN 12.0
 
 PIDClass softCon(PGAIN,IGAIN,DGAIN);
 
 EDifferential eDif;
 
-char* debugmessage;
+char debugmessage[32];
 
 //IR_1 is on the left
 const int IR_1 = A0;
@@ -134,7 +162,15 @@ void setup()
   pinMode(IR_3,INPUT);
   pinMode(IR_4,INPUT);
   pinMode(IR_5,INPUT);
-  Serial.begin(9600);
+
+  pinMode(IN1_PIN,OUTPUT);
+  pinMode(IN2_PIN,OUTPUT);
+  pinMode(IN3_PIN,OUTPUT);
+  pinMode(IN4_PIN,OUTPUT);
+
+  pinMode(ENA,OUTPUT);
+  pinMode(ENB,OUTPUT);
+  Serial.begin(115200);
 
   sensorArray[0].pin = IR_1;
   sensorArray[1].pin = IR_2;
@@ -142,7 +178,10 @@ void setup()
   sensorArray[3].pin = IR_4;
   sensorArray[4].pin = IR_5;
   
-  
+  digitalWrite(IN1_PIN,LOW);
+  digitalWrite(IN2_PIN,HIGH);
+  digitalWrite(IN3_PIN,LOW);
+  digitalWrite(IN4_PIN,HIGH);
   // sensorArray[0].bias = -2;
   // sensorArray[1].bias = -1;
   // sensorArray[2].bias = 0;
@@ -245,27 +284,38 @@ void loop()
 #pragma endregion
   auto startTime = millis();
   auto deltaTime = startTime-lastMillis;
-  auto line_errors = false;
+  auto line_errors = true;
   if(deltaTime>LOOP_MINTIME)
   {
     //Instantiate a PID Class pls
     auto fRead = ltsA.frameRead(sensorArray);
     // Pivot Control
-    
+    //Serial.println(fRead);
     auto dRead = softCon.getCorrectionTerm(deltaTime, fRead);// Store this into an array next time for more processing
+    Serial.println(dRead);
     eDif.motorEControlLoop(dRead);
     lastMillis = millis()-startTime;
+    
+    
+    //Always FORWARD!!!!
+    
 
-    motor_left.setSpeed(eDif.pMotorCommand.LMotor);
-    motor_right.setSpeed(eDif.pMotorCommand.RMotor);
-    motor_left.run(FORWARD);
-    motor_right.run(FORWARD);
+    analogWrite(ENA,eDif.pMotorCommand.LMotor);
+    analogWrite(ENB,eDif.pMotorCommand.RMotor);
+    // Serial.print("L: ");
+    // Serial.println(eDif.pMotorCommand.LMotor);
+    // Serial.print("R: ");
+    // Serial.println(eDif.pMotorCommand.LMotor);
+    // motor_left.setSpeed(eDif.pMotorCommand.LMotor);
+    // motor_right.setSpeed(eDif.pMotorCommand.RMotor);
+    // motor_left.run(FORWARD);
+    // motor_right.run(FORWARD);
   }
   else
   {
     if(line_errors)
     {
-      Serial.println(debugmessage);
+      //Serial.println(deltaTime);
     }
   }
 }

@@ -11,7 +11,7 @@ class PIDClass
     double dOut;
     double lastError;
     double lastCorrection;
-    double divisor = 0.01;
+    double divisor = 0.0000001;
     //if loop is constant time pass 1 into Dt but tune to it appropriately
     //this should strive to spit out a rate change term
     double getCorrectionTerm(long Dt,double error);

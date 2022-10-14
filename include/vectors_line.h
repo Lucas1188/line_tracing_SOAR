@@ -6,7 +6,8 @@ struct Vector2
     Vector2(){};
     Vector2(double _x,double _y):x(_x),y(_y)
     {
-        mag();        
+        mag();
+        angle_rad = atan(y/x);        
     };
     Vector2(double _angle,double _mag,bool polar):angle_rad(_angle),magnitude(_mag)
     {
