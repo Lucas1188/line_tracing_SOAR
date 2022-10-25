@@ -16,27 +16,16 @@ enum MOVESTRAT
   PIVOTR=-4,
   BESTDECEL=-99
 };
-
+enum RUN_STATE
+{
+  START,
+  B_CHECK,
+  PIVOT,
+  INTERCEPT,
+  ALIGN,
+  GRAB
+};
 long lastMillis;
-
-// void motor_move(AF_DCMotor motor, int power)
-// {
-//   if(power==0)
-//   {
-//     motor.setSpeed(0);
-//     motor.run(RELEASE);
-//   }
-//   else if (power> 0)
-//   {
-//     motor.setSpeed(abs(power));
-//     motor.run(FORWARD);
-//   }
-//   else if (power< 0)
-//   {
-//     motor.setSpeed(abs(power));
-//     motor.run(BACKWARD);
-//   }
-// }
 
 class sensor_buff
 {
@@ -53,33 +42,106 @@ class sensor_buff
       //read = analogRead(pin);
       if(analogRead(pin)<thresholdBlack)
       {  
-        // Serial.print(indexPos);
-        // Serial.print(": ");
-        // Serial.println(analogRead(pin));
-        
         return 1; //tune something here
       }
       else
       {
-        // Serial.print(indexPos);
-        // Serial.print(": ");
-        // Serial.println(analogRead(pin));
         return 0; //tune something here
       }
     }  
-  
 };
 
 class linetrackingSensor
 {
   public:
-    double frameRead(sensor_buff* sensearray)
+  linetrackingSensor(int _checkPointThreshold, int _bReadThreshold)
+  {
+    checkPointThreshold = _checkPointThreshold;
+    bReadThreshold = _bReadThreshold;
+    bufferThreshold = _checkPointThreshold;
+  };
+
+  int checkPointThreshold=0;
+  int bReadThreshold = 0;
+  int bufferThreshold = 0;
+  byte BinaryRead  = 0b00000000;
+  bool ReadingA = false;
+  bool writingB = false;
+  int bitCount = 0;
+    double frameRead(sensor_buff* sensearray,RUN_STATE run_state)
     {
       auto senseResult = pollLayer(sensearray);
 #ifdef DEBUGMSG
       //Serial.println(senseResult,BIN);
       
 #endif
+      switch (run_state)
+      {
+      case START:
+      {
+        if(senseResult == 0b00000100)
+        {
+          bufferThreshold-=1;
+        }
+        if(bufferThreshold<=0)
+        {
+          run_State = B_CHECK;
+          bufferThreshold = bReadThreshold;
+          ReadingA = true;
+        }
+      }
+        break;
+      case B_CHECK:
+      {
+        if(ReadingA)
+        {
+          if(senseResult!=0b00000100)
+          {
+            ReadingA = false;
+          }
+        }
+
+        if(!ReadingA)
+        {
+          if(senseResult == 0b00000100 && writingB)
+          {
+            ReadingA = true;
+            writingB = false;
+          }
+          else
+          {
+            bReadThreshold -=1;
+          }
+
+          if(bReadThreshold <=0 && !writingB)
+          {
+            writingB = true;
+            bitCount +=1;
+            if(senseResult == 0b00001110)
+            {
+              BinaryRead = BinaryRead <<1;
+              BinaryRead +=1;
+            }
+            if(senseResult == 0b00001100)
+            {
+              BinaryRead = BinaryRead <<1;
+            }
+          }
+        }
+        if(bitCount==6)
+        {
+          
+        }
+        
+      }
+      break;
+      default:
+        break;
+      }
+      if(senseResult==0b00001110)
+      {
+        //Check Point
+      }
 
       if(senseResult == 0b00000100)
       {
@@ -110,14 +172,12 @@ class linetrackingSensor
         
       }
       poll &= 0b00011111;
-      // Serial.print("b:");
-      //Serial.println(poll,BIN);
       return poll;
     }
 };
 
 sensor_buff sensorArray[5];
-linetrackingSensor ltsA;
+linetrackingSensor ltsA(10,10);
 
 // AF_DCMotor motor_left(1);
 // AF_DCMotor motor_right(4);
@@ -155,6 +215,18 @@ int currentSpeedL = 200;
 int currentSpeedR = 200;
 bool isLocked = true;
 
+
+
+const byte SecretCode[]= 
+{
+  0b11010011,
+  0b01111101,
+  0b11011110,
+  0b11110011
+};
+
+int ReadCount = 0;
+RUN_STATE run_State = START;
 void setup() 
 {
   pinMode(IR_1,INPUT);
@@ -182,13 +254,7 @@ void setup()
   digitalWrite(IN2_PIN,HIGH);
   digitalWrite(IN3_PIN,LOW);
   digitalWrite(IN4_PIN,HIGH);
-  // sensorArray[0].bias = -2;
-  // sensorArray[1].bias = -1;
-  // sensorArray[2].bias = 0;
-  // sensorArray[2].bias = 1;
-  // sensorArray[3].bias = 2;
 
-  //sensorArray[2].outofline = false;
   lastMillis = millis();
 }
 
@@ -197,98 +263,30 @@ void setup()
 void loop() 
 {
   #pragma region  LEGACY
-  // //Serial.println(sensorArray[2].readSensor());
 
-  // int totalBias =0;
-  // if(sensorArray[2].readSensor()!=0)
-  // {
-  //   for(int i= 0;i<5;i++)
-  //   {
-  //     if(i!=2)
-  //     {
-  //       totalBias+= sensorArray[i].readSensor();
-  //     }  
-  //   }
-  //   //Serial.println("");
-  //   //need a curve function; speed hold?
-  //   currentSpeedL-=totalBias;
-  //   currentSpeedR+=totalBias;
-  //   if(currentSpeedL<100)
-  //   {
-  //     currentSpeedL =100;
-  //     currentSpeedR +=totalBias;
-  //   }
-  //   if(currentSpeedR<100)
-  //   {
-  //     currentSpeedR =100;
-  //     currentSpeedL -=totalBias;
-  //   }
-  //   if(currentSpeedL>255)
-  //   {
-  //     currentSpeedL =255;
-  //     currentSpeedR -=totalBias;
-  //   }
-  //   if(currentSpeedR>255)
-  //   {
-  //     currentSpeedR =255;
-  //     currentSpeedL +=totalBias;
-  //   }
-  // }
-  // else
-  // {
-  //   // Serial.print(abs(currentSpeedL-currentSpeedR));
-  //   // Serial.println(" Straight");
-    
-  //   if(abs(currentSpeedL-currentSpeedR)>10)
-  //   {
-  //     bool isLhigher = (currentSpeedL>currentSpeedR);
-  //     if(isLhigher)
-  //     {
-  //       currentSpeedL-=10;
-  //     }
-  //     else
-  //     {
-  //       currentSpeedR-=10;
-  //     }
-  //   }
-  //   else
-  //   {
-  //     currentSpeedL+=MAX_ACCEL;
-  //     currentSpeedR+=MAX_ACCEL;
-  //     if(currentSpeedL>MAX_STRAIGHTSPEED)
-  //     {
-  //       currentSpeedR = MAX_STRAIGHTSPEED;
-  //       currentSpeedL = MAX_STRAIGHTSPEED;
-  //     }
-  //   }
-  // }
-  // Serial.println(currentSpeedL);
-  // Serial.print("L: ");
-  // Serial.print(currentSpeedL);
-  // Serial.print("R: ");
-  // Serial.println(currentSpeedR);
-  
-  // // if(Serial.available()>0)
-  // // {
-  // //   if(Serial.read()=='u')
-  // //   {
-  // //     isLocked = false;
-  // //   }
-  // // }
-  // if(isLocked)
-  // {  
-  //   motor_move(motor_left,currentSpeedL);
-  //   motor_move(motor_right,currentSpeedR);
-  // }
+  switch(run_State)
+  {
+    case START:
+    {
+
+    }
+    break;
+    case B_CHECK:
+    {
+
+    }
+    break;
+  }
   
 #pragma endregion
   auto startTime = millis();
   auto deltaTime = startTime-lastMillis;
   auto line_errors = true;
+
   if(deltaTime>LOOP_MINTIME)
   {
     //Instantiate a PID Class pls
-    auto fRead = ltsA.frameRead(sensorArray);
+    auto fRead = ltsA.frameRead(sensorArray,run_State);
     // Pivot Control
     //Serial.println(fRead);
     auto dRead = softCon.getCorrectionTerm(deltaTime, fRead);// Store this into an array next time for more processing
@@ -302,14 +300,6 @@ void loop()
 
     analogWrite(ENA,eDif.pMotorCommand.LMotor);
     analogWrite(ENB,eDif.pMotorCommand.RMotor);
-    // Serial.print("L: ");
-    // Serial.println(eDif.pMotorCommand.LMotor);
-    // Serial.print("R: ");
-    // Serial.println(eDif.pMotorCommand.LMotor);
-    // motor_left.setSpeed(eDif.pMotorCommand.LMotor);
-    // motor_right.setSpeed(eDif.pMotorCommand.RMotor);
-    // motor_left.run(FORWARD);
-    // motor_right.run(FORWARD);
   }
   else
   {
